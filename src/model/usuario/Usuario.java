@@ -23,4 +23,5 @@ public abstract class Usuario {
     public String getNombre() { return nombre; }
     public String getApellido() { return apellido; }
     public String getEmail() { return email; }
+    public String getContrasenia() { return contrasenia; }
 }

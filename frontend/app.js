@@ -1,11 +1,14 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   E-Market — lógica frontend
+   E-Market — lógica frontend (conectada a API Java)
    Refleja los mismos patrones del backend Java:
      • Strategy  → métodos de pago
      • State     → estados del pedido (Pendiente→Pagado→Enviado→Entregado)
      • Observer  → notificaciones toast al cambiar estado
      • Composite → categorías jerárquicas
    ══════════════════════════════════════════════════════════════════════════ */
+
+// ── Configuración de API ─────────────────────────────────────────────────────
+const API_BASE_URL = 'http://localhost:8080/api';
 
 // ── Estado global ────────────────────────────────────────────────────────────
 const store = {
@@ -15,8 +18,6 @@ const store = {
   pedidos:        [],   // { id, clienteId, fecha, estado, metodoPago, items[], total }
   carrito:        [],   // { producto, cantidad }
   usuarioActual:  null,
-  nextUserId:     1,
-  nextPedidoId:   1,
   metodoSeleccionado: null,
 };
 
@@ -29,39 +30,37 @@ const EMOJIS_CAT = {
   default: '📦',
 };
 
-// ── Datos de ejemplo ─────────────────────────────────────────────────────────
-function inicializarDatos() {
-  // Categorías (Composite)
-  store.categorias = [
-    { id: 1, nombre: 'Electrónica',  padreId: null },
-    { id: 2, nombre: 'Celulares',    padreId: 1    },
-    { id: 3, nombre: 'Laptops',      padreId: 1    },
-    { id: 4, nombre: 'Ropa',         padreId: null },
-    { id: 5, nombre: 'Calzado',      padreId: 4    },
-    { id: 6, nombre: 'Hogar',        padreId: null },
-    { id: 7, nombre: 'Cocina',       padreId: 6    },
-  ];
+// ── Inicialización ──────────────────────────────────────────────────────────
+async function inicializarDatos() {
+  try {
+    // Cargar productos del API
+    const respProductos = await fetch(`${API_BASE_URL}/productos`);
+    store.productos = await respProductos.json();
+    
+    // Extraer categorías únicas
+    const catsSet = new Set();
+    store.productos.forEach(p => {
+      if (p.categoria && p.categoria.nombre) {
+        catsSet.add(JSON.stringify(p.categoria));
+      }
+    });
+    store.categorias = Array.from(catsSet).map(c => JSON.parse(c));
+    
+    console.log('[API] Datos cargados:', store.productos.length, 'productos');
+  } catch (error) {
+    console.error('[API ERROR]', error);
+    toast('Error al conectar con el servidor', 'error');
+  }
+}
 
-  store.productos = [
-    { id: 1,  nombre: 'iPhone 15 Pro',    precio: 999.99,  stock: 8,  categoria: 'Celulares', emoji: '📱' },
-    { id: 2,  nombre: 'Samsung Galaxy S24',precio: 849.99, stock: 5,  categoria: 'Celulares', emoji: '📱' },
-    { id: 3,  nombre: 'Xiaomi Redmi Note',precio: 299.99,  stock: 12, categoria: 'Celulares', emoji: '📱' },
-    { id: 4,  nombre: 'MacBook Air M2',   precio: 1299.99, stock: 3,  categoria: 'Laptops',   emoji: '💻' },
-    { id: 5,  nombre: 'Dell XPS 15',      precio: 1099.99, stock: 4,  categoria: 'Laptops',   emoji: '💻' },
-    { id: 6,  nombre: 'Remera Dry-Fit',   precio: 24.99,   stock: 50, categoria: 'Ropa',      emoji: '👕' },
-    { id: 7,  nombre: 'Buzo Urbano',      precio: 49.99,   stock: 30, categoria: 'Ropa',      emoji: '🧥' },
-    { id: 8,  nombre: 'Zapatillas Run',   precio: 79.99,   stock: 20, categoria: 'Calzado',   emoji: '👟' },
-    { id: 9,  nombre: 'Sartén Antiadher.',precio: 34.99,   stock: 15, categoria: 'Cocina',    emoji: '🍳' },
-    { id: 10, nombre: 'Set Cuchillos',    precio: 59.99,   stock: 7,  categoria: 'Cocina',    emoji: '🔪' },
-  ];
-
-  // Usuario admin precargado
-  store.usuarios.push({
-    id: store.nextUserId++,
-    nombre: 'Admin', apellido: 'Sistema',
-    email: 'admin@emarket.com', pass: 'admin123',
-    rol: 'admin', legajo: 1001,
-  });
+// ── Helper para emojis ──────────────────────────────────────────────────────
+function getEmojiProducto(nombre) {
+  for (const [cat, emoji] of Object.entries(EMOJIS_CAT)) {
+    if (cat !== 'default' && nombre.toLowerCase().includes(cat.toLowerCase())) {
+      return emoji;
+    }
+  }
+  return EMOJIS_CAT.default;
 }
 
 // ── Render catálogo ──────────────────────────────────────────────────────────
@@ -73,10 +72,10 @@ function renderCatalogo(productos) {
   }
   grid.innerHTML = productos.map(p => `
     <div class="product-card">
-      <div class="product-img">${p.emoji}</div>
+      <div class="product-img">${getEmojiProducto(p.nombre)}</div>
       <div class="product-body">
         <div class="product-name">${p.nombre}</div>
-        <div class="product-cat">${p.categoria}</div>
+        <div class="product-cat">${p.categoria?.nombre || 'General'}</div>
         <div class="product-price">$${p.precio.toFixed(2)}</div>
         <div class="product-stock ${p.stock === 0 ? 'sin-stock' : ''}">
           ${p.stock > 0 ? `Stock: ${p.stock}` : 'Sin stock'}
@@ -89,30 +88,29 @@ function renderCatalogo(productos) {
 }
 
 function renderCategoriasMenu() {
-  const raices = store.categorias.filter(c => !c.padreId);
   const ul = document.getElementById('categoriaList');
   const sel = document.getElementById('searchCategory');
 
   // sidebar
   ul.innerHTML = `<li class="active" onclick="filtrarPorCategoria(null, this)">Todos</li>`;
-  raices.forEach(cat => {
-    ul.innerHTML += `<li onclick="filtrarPorCategoria('${cat.nombre}', this)">${cat.nombre}</li>`;
-    const hijos = store.categorias.filter(c => c.padreId === cat.id);
-    hijos.forEach(h => {
-      ul.innerHTML += `<li style="padding-left:1.5rem;font-size:.88rem" onclick="filtrarPorCategoria('${h.nombre}', this)">↳ ${h.nombre}</li>`;
-    });
+  const categoriasPorNombre = {};
+  store.categorias.forEach(cat => {
+    if (cat.nombre) {
+      categoriasPorNombre[cat.nombre] = true;
+      ul.innerHTML += `<li onclick="filtrarPorCategoria('${cat.nombre}', this)">${cat.nombre}</li>`;
+    }
   });
 
   // select de búsqueda
   sel.innerHTML = '<option value="">Todas las categorías</option>';
-  store.categorias.forEach(c => {
-    sel.innerHTML += `<option value="${c.nombre}">${c.nombre}</option>`;
+  Object.keys(categoriasPorNombre).forEach(nombre => {
+    sel.innerHTML += `<option value="${nombre}">${nombre}</option>`;
   });
 }
 
 function filtrarPorCategoria(categoria, el) {
   document.querySelectorAll('.sidebar li').forEach(li => li.classList.remove('active'));
-  el.classList.add('active');
+  if (el) el.classList.add('active');
 
   const titulo = document.getElementById('catalogoTitulo');
   if (!categoria) {
@@ -120,28 +118,43 @@ function filtrarPorCategoria(categoria, el) {
     renderCatalogo(store.productos);
   } else {
     titulo.textContent = categoria;
-    renderCatalogo(store.productos.filter(p => p.categoria === categoria));
+    renderCatalogo(store.productos.filter(p => p.categoria?.nombre === categoria));
   }
   mostrarSeccion('catalogo');
 }
 
 // ── Búsqueda ─────────────────────────────────────────────────────────────────
-function buscarProductos() {
+async function buscarProductos() {
   const texto    = document.getElementById('searchInput').value.toLowerCase().trim();
   const cat      = document.getElementById('searchCategory').value;
   const minVal   = parseFloat(document.getElementById('priceMin').value);
   const maxVal   = parseFloat(document.getElementById('priceMax').value);
 
-  let resultado = store.productos;
-  if (texto)              resultado = resultado.filter(p => p.nombre.toLowerCase().includes(texto));
-  if (cat)                resultado = resultado.filter(p => p.categoria === cat);
-  if (!isNaN(minVal))     resultado = resultado.filter(p => p.precio >= minVal);
-  if (!isNaN(maxVal))     resultado = resultado.filter(p => p.precio <= maxVal);
+  try {
+    let url = `${API_BASE_URL}/productos`;
+    const params = new URLSearchParams();
 
-  document.getElementById('catalogoTitulo').textContent =
-    texto || cat ? `Resultados de búsqueda` : 'Todos los productos';
-  mostrarSeccion('catalogo');
-  renderCatalogo(resultado);
+    if (texto) params.append('nombre', texto);
+    if (cat) params.append('categoria', cat);
+    if (!isNaN(minVal)) params.append('precioMin', minVal);
+    if (!isNaN(maxVal)) params.append('precioMax', maxVal);
+
+    if (params.toString()) {
+      url += '?' + params.toString();
+    }
+
+    const resp = await fetch(url);
+    const resultado = await resp.json();
+
+    document.getElementById('catalogoTitulo').textContent =
+      texto || cat ? `Resultados de búsqueda` : 'Todos los productos';
+    mostrarSeccion('catalogo');
+    renderCatalogo(resultado);
+
+  } catch (error) {
+    console.error('[ERROR] Búsqueda fallida:', error);
+    toast('Error al buscar productos', 'error');
+  }
 }
 
 document.getElementById('searchInput').addEventListener('keydown', e => {
@@ -310,13 +323,13 @@ function confirmarCompra() {
     if (cvv.length < 3 || !/^\d+$/.test(cvv)) {
       mostrarError('checkoutError', 'CVV inválido.'); return;
     }
-    nombreMetodo = 'Tarjeta de Crédito';
+    nombreMetodo = 'tarjeta';
   } else if (store.metodoSeleccionado === 'paypal') {
     const cuenta = document.getElementById('ppCuenta').value.trim();
     if (!cuenta.includes('@')) {
       mostrarError('checkoutError', 'Email de PayPal inválido.'); return;
     }
-    nombreMetodo = 'PayPal';
+    nombreMetodo = 'paypal';
   } else if (store.metodoSeleccionado === 'transferencia') {
     const cbu   = document.getElementById('transCBU').value.trim();
     const banco = document.getElementById('transBanco').value.trim();
@@ -326,7 +339,7 @@ function confirmarCompra() {
     if (!banco) {
       mostrarError('checkoutError', 'Ingresá el nombre del banco.'); return;
     }
-    nombreMetodo = 'Transferencia Bancaria';
+    nombreMetodo = 'transferencia';
   }
 
   // Verificar stock antes de confirmar
@@ -337,60 +350,85 @@ function confirmarCompra() {
     }
   }
 
-  // Crear pedido (State pattern: inicia en Pendiente, avanza a Pagado)
-  const pedido = {
-    id: store.nextPedidoId++,
-    clienteId: store.usuarioActual.id,
-    fecha: new Date().toLocaleDateString('es-AR'),
-    estado: 'Pendiente',
-    metodoPago: nombreMetodo,
-    items: store.carrito.map(i => ({ ...i })),
-    total: calcularTotalCarrito(),
-  };
+  // Enviar pedido al API
+  crearPedidoEnAPI(nombreMetodo);
+}
 
-  // Descontar stock
-  store.carrito.forEach(i => { i.producto.stock -= i.cantidad; });
+async function crearPedidoEnAPI(metodoPago) {
+  try {
+    const items = store.carrito.map(i => ({
+      productoId: i.producto.id,
+      cantidad: i.cantidad
+    }));
 
-  // Avanzar a Pagado (pago procesado)
-  pedido.estado = 'Pagado';
+    const resp = await fetch(`${API_BASE_URL}/pedidos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        usuarioId: store.usuarioActual.id,
+        metodoPago: metodoPago,
+        items: items
+      })
+    });
 
-  store.pedidos.push(pedido);
-  store.carrito = [];
-  actualizarBadgeCarrito();
-  cerrarModal('modalCheckout');
+    const data = await resp.json();
 
-  // Observer: notificación de confirmación
-  notificarCambioEstado(pedido);
-  toast(`¡Pedido #${pedido.id} confirmado! Pago con ${nombreMetodo} procesado. ✓`, 'success');
+    if (!resp.ok) {
+      mostrarError('checkoutError', data.error || 'Error al confirmar compra');
+      return;
+    }
 
-  renderCatalogo(store.productos);
+    // Limpiar carrito
+    store.carrito = [];
+    actualizarBadgeCarrito();
+    cerrarModal('modalCheckout');
+
+    toast(`¡Pedido confirmado! Pago procesado. ✓`, 'success');
+    renderCatalogo(store.productos);
+
+  } catch (error) {
+    mostrarError('checkoutError', 'Error al conectar: ' + error.message);
+  }
 }
 
 // ── Pedidos ──────────────────────────────────────────────────────────────────
-function renderMisPedidos() {
-  const pedidos = store.pedidos.filter(p => p.clienteId === store.usuarioActual?.id);
-  const el = document.getElementById('misPedidosList');
-  if (!pedidos.length) {
-    el.innerHTML = '<p style="color:var(--muted)">No tenés pedidos todavía.</p>';
-    return;
+async function renderMisPedidos() {
+  try {
+    const resp = await fetch(`${API_BASE_URL}/pedidos?usuarioId=${store.usuarioActual.id}`);
+    const pedidos = await resp.json();
+    
+    const el = document.getElementById('misPedidosList');
+    if (!pedidos.length) {
+      el.innerHTML = '<p style="color:var(--muted)">No tenés pedidos todavía.</p>';
+      return;
+    }
+    el.innerHTML = pedidos.map(p => renderPedidoCard(p, false)).join('');
+  } catch (error) {
+    console.error('[ERROR] Cargar pedidos:', error);
+    document.getElementById('misPedidosList').innerHTML = '<p style="color:red">Error al cargar pedidos</p>';
   }
-  el.innerHTML = pedidos.map(p => renderPedidoCard(p, false)).join('');
 }
 
-function renderAdminPedidos() {
-  const el = document.getElementById('todosLosPedidosList');
-  if (!store.pedidos.length) {
-    el.innerHTML = '<p style="color:var(--muted)">No hay pedidos registrados.</p>';
-    return;
+async function renderAdminPedidos() {
+  try {
+    const resp = await fetch(`${API_BASE_URL}/pedidos`);
+    const pedidos = await resp.json();
+    
+    const el = document.getElementById('todosLosPedidosList');
+    if (!pedidos.length) {
+      el.innerHTML = '<p style="color:var(--muted)">No hay pedidos registrados.</p>';
+      return;
+    }
+    el.innerHTML = pedidos.map(p => renderPedidoCard(p, true)).join('');
+  } catch (error) {
+    console.error('[ERROR] Cargar pedidos admin:', error);
+    document.getElementById('todosLosPedidosList').innerHTML = '<p style="color:red">Error al cargar pedidos</p>';
   }
-  el.innerHTML = store.pedidos.map(p => renderPedidoCard(p, true)).join('');
 }
 
 function renderPedidoCard(pedido, esAdmin) {
   const sigEstado = siguienteEstado(pedido.estado);
   const itemsTexto = pedido.items.map(i => `${i.producto.nombre} x${i.cantidad}`).join(', ');
-  const cliente = store.usuarios.find(u => u.id === pedido.clienteId);
-  const clienteNombre = cliente ? `${cliente.nombre} ${cliente.apellido}` : '—';
 
   const btnAvanzar = esAdmin && sigEstado
     ? `<button onclick="avanzarEstadoPedido(${pedido.id})">→ ${sigEstado}</button>`
@@ -401,7 +439,6 @@ function renderPedidoCard(pedido, esAdmin) {
       <div class="pedido-header">
         <div>
           <span class="pedido-id">Pedido #${pedido.id}</span>
-          ${esAdmin ? `<span style="color:var(--muted);font-size:.85rem;margin-left:.5rem">· ${clienteNombre}</span>` : ''}
         </div>
         <span class="estado-badge estado-${pedido.estado}">${pedido.estado}</span>
       </div>
@@ -441,7 +478,7 @@ function notificarCambioEstado(pedido) {
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
-function registrar() {
+async function registrar() {
   ocultarError('regError');
   const nombre   = document.getElementById('regNombre').value.trim();
   const apellido = document.getElementById('regApellido').value.trim();
@@ -459,32 +496,67 @@ function registrar() {
   if (pass.length < 4) {
     mostrarError('regError', 'La contraseña debe tener al menos 4 caracteres.'); return;
   }
-  if (store.usuarios.find(u => u.email === email)) {
-    mostrarError('regError', 'Ya existe una cuenta con ese email.'); return;
-  }
   if (rol === 'admin' && !legajo) {
     mostrarError('regError', 'El legajo es obligatorio para administradores.'); return;
   }
 
-  const nuevo = { id: store.nextUserId++, nombre, apellido, email, pass, rol, legajo };
-  store.usuarios.push(nuevo);
-  cerrarModal('modalRegistro');
-  iniciarSesion(nuevo);
-  toast(`Bienvenido/a, ${nombre}! Cuenta creada. ✓`, 'success');
+  try {
+    const payload = { nombre, apellido, email, pass, rol };
+    if (rol === 'admin') payload.legajo = legajo;
+
+    const resp = await fetch(`${API_BASE_URL}/usuarios/registro`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      mostrarError('regError', data.error || 'Error en el registro');
+      return;
+    }
+
+    cerrarModal('modalRegistro');
+    iniciarSesion(data.usuario);
+    toast(`Bienvenido/a, ${nombre}! Cuenta creada. ✓`, 'success');
+
+  } catch (error) {
+    mostrarError('regError', 'Error al conectar con el servidor: ' + error.message);
+  }
 }
 
-function login() {
+async function login() {
   ocultarError('loginError');
   const email = document.getElementById('loginEmail').value.trim().toLowerCase();
   const pass  = document.getElementById('loginPass').value;
 
-  const usuario = store.usuarios.find(u => u.email === email && u.pass === pass);
-  if (!usuario) {
-    mostrarError('loginError', 'Email o contraseña incorrectos.'); return;
+  if (!email || !pass) {
+    mostrarError('loginError', 'Completá email y contraseña.');
+    return;
   }
-  cerrarModal('modalLogin');
-  iniciarSesion(usuario);
-  toast(`Bienvenido/a, ${usuario.nombre}!`, 'success');
+
+  try {
+    const resp = await fetch(`${API_BASE_URL}/usuarios/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, pass })
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      mostrarError('loginError', data.error || 'Error en login');
+      return;
+    }
+
+    cerrarModal('modalLogin');
+    iniciarSesion(data.usuario);
+    toast(`Bienvenido/a, ${data.usuario.nombre}!`, 'success');
+
+  } catch (error) {
+    mostrarError('loginError', 'Error al conectar con el servidor: ' + error.message);
+  }
 }
 
 function iniciarSesion(usuario) {
@@ -567,6 +639,10 @@ function toast(msg, tipo = '') {
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
-inicializarDatos();
-renderCategoriasMenu();
-renderCatalogo(store.productos);
+(async function() {
+  console.log('[INIT] Conectando con API...');
+  await inicializarDatos();
+  renderCategoriasMenu();
+  renderCatalogo(store.productos);
+  toast('Conectado al servidor ✓', 'success');
+})();

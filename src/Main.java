@@ -8,6 +8,7 @@ import model.producto.Categoria;
 import model.producto.Producto;
 import model.usuario.Administrador;
 import model.usuario.Cliente;
+import repository.DBConnection;
 import repository.PedidoRepository;
 import repository.ProductoRepository;
 import repository.UsuarioRepository;
@@ -17,6 +18,7 @@ import service.UsuarioService;
 import state.estadosPedidos.Enviado;
 import strategy.metodosPago.PagoPayPal;
 import strategy.metodosPago.TarjetaCredito;
+import api.ApiServer;
 
 public class Main {
 
@@ -28,9 +30,25 @@ public class Main {
         ProductoRepository productoRepo = new ProductoRepository();
         PedidoRepository pedidoRepo     = new PedidoRepository();
 
+        // Limpiar datos de demo para evitar emails duplicados en ejecuciones repetidas.
+        DBConnection.resetDemoData();
+
         // ── Servicios ────────────────────────────────────────────────────────
         UsuarioService usuarioService = new UsuarioService(usuarioRepo);
         PedidoService  pedidoService  = new PedidoService(pedidoRepo);
+        CarritoService carritoService = new CarritoService(null); // Dummy para API
+
+        // ── Iniciar servidor REST API ────────────────────────────────────────
+        System.out.println("\n[STARTUP] Iniciando servidor REST API...");
+        ApiServer apiServer = ApiServer.getInstance();
+        try {
+            apiServer.start(usuarioRepo, productoRepo, pedidoRepo, carritoService);
+        } catch (Exception e) {
+            System.err.println("[ERROR] No se pudo iniciar el servidor API: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        System.out.println("\n[STARTUP] Ejecutando demostración de backend en segundo plano...\n");
 
         separador("REGISTRO DE USUARIOS");
         usuarioService.registrarCliente("Juan", "Pérez", "juan@mail.com", "pass123");
@@ -70,18 +88,18 @@ public class Main {
 
         // ── Carrito (CU-07 a CU-10) ──────────────────────────────────────────
         separador("CARRITO DE COMPRAS");
-        CarritoService carritoService = new CarritoService(cliente.getCarrito());
-        carritoService.agregarProducto(iphone, 1);
-        carritoService.agregarProducto(samsung, 2);
-        carritoService.verResumen();
+        CarritoService carritoDemo = new CarritoService(cliente.getCarrito());
+        carritoDemo.agregarProducto(iphone, 1);
+        carritoDemo.agregarProducto(samsung, 2);
+        carritoDemo.verResumen();
 
         System.out.println("\nModificando cantidad de Samsung a 1...");
-        carritoService.modificarCantidad(samsung.getId(), 1);
-        carritoService.verResumen();
+        carritoDemo.modificarCantidad(samsung.getId(), 1);
+        carritoDemo.verResumen();
 
         System.out.println("\nEliminando Samsung del carrito...");
-        carritoService.eliminarItem(samsung.getId());
-        carritoService.verResumen();
+        carritoDemo.eliminarItem(samsung.getId());
+        carritoDemo.verResumen();
 
         // ── CU-11/12 Selección de pago y confirmación de compra ──────────────
         separador("CONFIRMACIÓN DE COMPRA (Patrón Strategy)");
@@ -114,9 +132,9 @@ public class Main {
         usuarioService.registrarCliente("María", "López", "maria@mail.com", "abc123");
         Cliente cliente2 = (Cliente) usuarioService.login("maria@mail.com", "abc123");
 
-        CarritoService carrito2 = new CarritoService(cliente2.getCarrito());
-        carrito2.agregarProducto(macbook, 1);
-        carrito2.verResumen();
+        CarritoService carrito2Demo = new CarritoService(cliente2.getCarrito());
+        carrito2Demo.agregarProducto(macbook, 1);
+        carrito2Demo.verResumen();
 
         PagoPayPal paypal = new PagoPayPal("maria@paypal.com", "tok_secure_xyz");
         Pedido pedido2 = pedidoService.confirmarCompra(cliente2, paypal);
