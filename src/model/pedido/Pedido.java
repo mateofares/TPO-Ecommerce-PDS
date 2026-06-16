@@ -12,19 +12,25 @@ import java.util.List;
 
 public class Pedido {
     private long id;
+    private long usuarioId;
     private LocalDate fecha;
     private EstadoPedido estado;
     private MetodoPago metodoPago;
     private List<ItemCarrito> items;
     private List<ObservadorPedido> observadores;
 
-    public Pedido(long id, List<ItemCarrito> items, MetodoPago metodoPago, List<ObservadorPedido> observadores) {
+    public Pedido(long id, long usuarioId, List<ItemCarrito> items, MetodoPago metodoPago, List<ObservadorPedido> observadores) {
         this.id = id;
+        this.usuarioId = usuarioId;
         this.fecha = LocalDate.now();
         this.estado = new Pendiente();
         this.items = new ArrayList<>(items);
         this.metodoPago = metodoPago;
         this.observadores = new ArrayList<>(observadores);
+    }
+
+    public Pedido(long id, List<ItemCarrito> items, MetodoPago metodoPago, List<ObservadorPedido> observadores) {
+        this(id, 0L, items, metodoPago, observadores);
     }
 
     public void confirmar() {
@@ -43,7 +49,7 @@ public class Pedido {
 
     public void cambiarEstado(EstadoPedido nuevoEstado) {
         this.estado = nuevoEstado;
-        notificarObservadores("Pedido #" + id + " cambió a estado: " + estado.getNombre());
+        notificarObservadores("Pedido #" + id + " cambio a estado: " + estado.getNombre());
     }
 
     public void notificarObservadores(String msg) {
@@ -65,6 +71,7 @@ public class Pedido {
     }
 
     public long getId() { return id; }
+    public long getUsuarioId() { return usuarioId; }
     public LocalDate getFecha() { return fecha; }
     public EstadoPedido getEstado() { return estado; }
     public String getEstadoNombre() { return estado.getNombre(); }

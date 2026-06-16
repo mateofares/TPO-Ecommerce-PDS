@@ -78,18 +78,21 @@ public class JsonUtils {
   public static String pedidoToJson(Pedido p) {
     StringBuilder sb = new StringBuilder("{");
     sb.append("\"id\":").append(p.getId()).append(",");
+    sb.append("\"usuarioId\":").append(p.getUsuarioId()).append(",");
     sb.append("\"fecha\":\"").append(p.getFecha()).append("\",");
-    sb.append("\"estado\":\"").append(p.getEstado().getClass().getSimpleName()).append("\",");
-    sb.append("\"metodoPago\":\"").append(p.getMetodoPago().getClass().getSimpleName()).append("\",");
+    sb.append("\"estado\":\"").append(p.getEstadoNombre()).append("\",");
+    sb.append("\"metodoPago\":\"").append(p.getMetodoPago().getNombre()).append("\",");
     sb.append("\"total\":").append(p.calcularTotal()).append(",");
+    boolean puedeAvanzar = !(p.getEstado() instanceof state.estadosPedidos.Entregado);
+    sb.append("\"puedeAvanzar\":").append(puedeAvanzar).append(",");
     sb.append("\"items\":[");
-    
+
     java.util.List<ItemCarrito> items = p.getItems();
     for (int i = 0; i < items.size(); i++) {
       if (i > 0) sb.append(",");
       sb.append(itemCarritoToJson(items.get(i)));
     }
-    
+
     sb.append("]");
     sb.append("}");
     return sb.toString();
@@ -132,10 +135,16 @@ public class JsonUtils {
 
     for (int i = 0; i < json.length(); i++) {
       char c = json.charAt(i);
-      
+
       if (c == '{' || c == '[') depth++;
-      else if (c == '}' || c == ']') depth--;
-      else if (c == ':' && depth == 0) {
+      else if (c == '}' || c == ']') {
+        depth--;
+        // Último valor termina en } o ] — guardarlo ahora que depth vuelve a 0
+        if (depth == 0 && i == json.length() - 1 && key != null) {
+          String value = json.substring(start).trim();
+          map.put(key, parseJson(value));
+        }
+      } else if (c == ':' && depth == 0) {
         key = json.substring(start, i).trim();
         if (key.startsWith("\"")) key = key.substring(1, key.length() - 1);
         start = i + 1;
@@ -164,10 +173,15 @@ public class JsonUtils {
 
     for (int i = 0; i < json.length(); i++) {
       char c = json.charAt(i);
-      
+
       if (c == '{' || c == '[') depth++;
-      else if (c == '}' || c == ']') depth--;
-      else if ((c == ',' || i == json.length() - 1) && depth == 0) {
+      else if (c == '}' || c == ']') {
+        depth--;
+        // Último elemento termina en } o ] — agregarlo ahora que depth vuelve a 0
+        if (depth == 0 && i == json.length() - 1) {
+          list.add(parseJson(json.substring(start).trim()));
+        }
+      } else if ((c == ',' || i == json.length() - 1) && depth == 0) {
         if (i == json.length() - 1 && c != ',') {
           String value = json.substring(start).trim();
           list.add(parseJson(value));

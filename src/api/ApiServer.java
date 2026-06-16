@@ -11,38 +11,30 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 import repository.*;
-import service.*;
 import util.JsonUtils;
 import strategy.metodosPago.*;
-import state.estadosPedidos.*;
 
 public class ApiServer {
   private HttpServer server;
   private static ApiServer instance;
   
-  private UsuarioRepository usuarioRepo;
   private ProductoRepository productoRepo;
-  private PedidoRepository pedidoRepo;
-  private CarritoService carritoService;
-
-  private long generateUserId() {
-    return System.nanoTime() / 1000000; // Genera ID basado en nanotime
-  }
+  private service.UsuarioService usuarioService;
+  private service.PedidoService pedidoService;
 
   private ApiServer() {}
 
-  public static ApiServer getInstance() {
+  public static synchronized ApiServer getInstance() {
     if (instance == null) {
       instance = new ApiServer();
     }
     return instance;
   }
 
-  public void start(UsuarioRepository uRepo, ProductoRepository pRepo, PedidoRepository pedRepo, CarritoService cart) throws Exception {
-    this.usuarioRepo = uRepo;
+  public void start(UsuarioRepository uRepo, ProductoRepository pRepo, PedidoRepository pedRepo) throws Exception {
     this.productoRepo = pRepo;
-    this.pedidoRepo = pedRepo;
-    this.carritoService = cart;
+    this.usuarioService = new service.UsuarioService(uRepo);
+    this.pedidoService  = new service.PedidoService(pedRepo, pRepo, uRepo);
 
     server = HttpServer.create(new InetSocketAddress(8080), 0);
     
@@ -99,33 +91,29 @@ public class ApiServer {
 
       try {
         Map<String, Object> data = parseJson(exchange);
-        String nombre = JsonUtils.getString(data, "nombre");
+        String nombre   = JsonUtils.getString(data, "nombre");
         String apellido = JsonUtils.getString(data, "apellido");
-        String email = JsonUtils.getString(data, "email");
-        String pass = JsonUtils.getString(data, "pass");
-        String rol = JsonUtils.getString(data, "rol").toLowerCase();
+        String email    = JsonUtils.getString(data, "email");
+        String pass     = JsonUtils.getString(data, "pass");
+        String rol      = JsonUtils.getString(data, "rol").toLowerCase();
 
         if (nombre.isEmpty() || email.isEmpty() || pass.isEmpty()) {
           respond(exchange, 400, JsonUtils.createErrorResponse("Faltan campos requeridos"));
           return;
         }
 
-        if (usuarioRepo.existeEmail(email)) {
-          respond(exchange, 409, JsonUtils.createErrorResponse("Email ya registrado"));
-          return;
-        }
-
         model.usuario.Usuario nuevoUsuario;
         if ("admin".equals(rol)) {
           int legajo = JsonUtils.getInt(data, "legajo");
-          nuevoUsuario = new model.usuario.Administrador(generateUserId(), nombre, apellido, email, pass, legajo);
+          nuevoUsuario = usuarioService.registrarAdministrador(nombre, apellido, email, pass, legajo);
         } else {
-          nuevoUsuario = new model.usuario.Cliente(generateUserId(), nombre, apellido, email, pass);
+          nuevoUsuario = usuarioService.registrarCliente(nombre, apellido, email, pass);
         }
 
-        usuarioRepo.save(nuevoUsuario);
         respond(exchange, 201, "{\"success\":true,\"usuario\":" + JsonUtils.toJson(nuevoUsuario) + "}");
 
+      } catch (IllegalArgumentException e) {
+        respond(exchange, 409, JsonUtils.createErrorResponse(e.getMessage()));
       } catch (Exception e) {
         respond(exchange, 500, JsonUtils.createErrorResponse(e.getMessage()));
       }
@@ -151,21 +139,18 @@ public class ApiServer {
       try {
         Map<String, Object> data = parseJson(exchange);
         String email = JsonUtils.getString(data, "email");
-        String pass = JsonUtils.getString(data, "pass");
+        String pass  = JsonUtils.getString(data, "pass");
 
         if (email.isEmpty() || pass.isEmpty()) {
-          respond(exchange, 400, JsonUtils.createErrorResponse("Email y contraseña requeridos"));
+          respond(exchange, 400, JsonUtils.createErrorResponse("Email y contrasena requeridos"));
           return;
         }
 
-        model.usuario.Usuario usuario = usuarioRepo.findByEmail(email);
-        if (usuario == null || !usuario.getContrasenia().equals(pass)) {
-          respond(exchange, 401, JsonUtils.createErrorResponse("Email o contraseña incorrectos"));
-          return;
-        }
-
+        model.usuario.Usuario usuario = usuarioService.login(email, pass);
         respond(exchange, 200, "{\"success\":true,\"usuario\":" + JsonUtils.toJson(usuario) + "}");
 
+      } catch (IllegalArgumentException e) {
+        respond(exchange, 401, JsonUtils.createErrorResponse(e.getMessage()));
       } catch (Exception e) {
         respond(exchange, 500, JsonUtils.createErrorResponse(e.getMessage()));
       }
@@ -282,40 +267,99 @@ public class ApiServer {
     @Override
     public void handle(HttpExchange exchange) throws java.io.IOException {
       enableCors(exchange);
-      
+
       if ("OPTIONS".equals(exchange.getRequestMethod())) {
         exchange.sendResponseHeaders(204, -1);
         return;
       }
 
       String method = exchange.getRequestMethod();
+      String path   = exchange.getRequestURI().getPath();
 
       try {
+        // PUT /api/pedidos/{id}/avanzar  — el backend decide la transición (State pattern)
+        if ("PUT".equals(method) && path.matches("/api/pedidos/\\d+/avanzar")) {
+          String[] parts = path.split("/");
+          long pedidoId = Long.parseLong(parts[3]);
+          try {
+            model.pedido.Pedido pedido = pedidoService.avanzarEstado(pedidoId);
+            respond(exchange, 200, "{\"success\":true,\"pedido\":" + JsonUtils.toJson(pedido) + "}");
+          } catch (IllegalStateException e) {
+            respond(exchange, 422, JsonUtils.createErrorResponse(e.getMessage()));
+          }
+          return;
+        }
+
         if ("GET".equals(method)) {
-          // GET /api/pedidos → todos los pedidos
-          List<model.pedido.Pedido> pedidos = pedidoRepo.findAll();
-          
+          String query = exchange.getRequestURI().getRawQuery();
+          List<model.pedido.Pedido> pedidos;
+
+          if (query != null && query.contains("usuarioId=")) {
+            Map<String, String> params = parseQueryString(query);
+            long usuarioId = Long.parseLong(params.get("usuarioId"));
+            pedidos = pedidoService.verPedidosDeUsuario(usuarioId);
+          } else {
+            pedidos = pedidoService.verTodosPedidos();
+          }
+
           StringBuilder json = new StringBuilder("[");
           for (int i = 0; i < pedidos.size(); i++) {
             if (i > 0) json.append(",");
             json.append(JsonUtils.toJson(pedidos.get(i)));
           }
           json.append("]");
-
           respond(exchange, 200, json.toString());
 
         } else if ("POST".equals(method)) {
-          // POST /api/pedidos → crear pedido
-          respond(exchange, 501, JsonUtils.createErrorResponse("Crear pedidos desde API no está implementado aún"));
+          Map<String, Object> data = parseJson(exchange);
+          long usuarioId = Long.parseLong(JsonUtils.getString(data, "usuarioId"));
+          String metodoPagoTipo = JsonUtils.getString(data, "metodoPago");
+
+          Object itemsRaw = data.get("items");
+          if (!(itemsRaw instanceof List)) {
+            respond(exchange, 400, JsonUtils.createErrorResponse("items requerido"));
+            return;
+          }
+
+          List<model.carrito.ItemCarrito> itemCarritos = new ArrayList<>();
+          for (Object itemObj : (List<?>) itemsRaw) {
+            if (!(itemObj instanceof Map)) continue;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> itemMap = (Map<String, Object>) itemObj;
+            long productoId = Long.parseLong(JsonUtils.getString(itemMap, "productoId"));
+            int cantidad    = JsonUtils.getInt(itemMap, "cantidad");
+
+            model.producto.Producto producto = productoRepo.findById(productoId);
+            if (producto == null) {
+              respond(exchange, 400, JsonUtils.createErrorResponse("Producto no encontrado: " + productoId));
+              return;
+            }
+            itemCarritos.add(new model.carrito.ItemCarrito(producto, cantidad));
+          }
+
+          if (itemCarritos.isEmpty()) {
+            respond(exchange, 400, JsonUtils.createErrorResponse("El carrito está vacío"));
+            return;
+          }
+
+          @SuppressWarnings("unchecked")
+          Map<String, Object> detallesPago = data.get("detallesPago") instanceof Map
+              ? (Map<String, Object>) data.get("detallesPago") : new HashMap<>();
+          strategy.metodosPago.MetodoPago metodoPago = construirMetodoPago(metodoPagoTipo, detallesPago);
+          model.pedido.Pedido pedido = pedidoService.crearPedido(usuarioId, itemCarritos, metodoPago);
+          respond(exchange, 201, "{\"success\":true,\"pedido\":" + JsonUtils.toJson(pedido) + "}");
 
         } else {
           respond(exchange, 405, JsonUtils.createErrorResponse("Método no permitido"));
         }
 
+      } catch (IllegalStateException e) {
+        respond(exchange, 422, JsonUtils.createErrorResponse(e.getMessage()));
       } catch (Exception e) {
         respond(exchange, 500, JsonUtils.createErrorResponse(e.getMessage()));
       }
     }
+
   }
 
   // ──── HELPERS ───────────────────────────────────────────────────────────────
@@ -369,15 +413,20 @@ public class ApiServer {
     return params;
   }
 
-  private MetodoPago construirMetodoPago(String tipo) {
+  private MetodoPago construirMetodoPago(String tipo, Map<String, Object> detalles) {
     switch (tipo.toLowerCase()) {
       case "paypal":
-        return new PagoPayPal("test@paypal.com", "tok_secure_xyz");
+        String cuenta = JsonUtils.getString(detalles, "cuenta");
+        return new PagoPayPal(cuenta, "tok_secure");
       case "transferencia":
-        return new PagoTransferencia("1234567890", "Banco Test");
+        String cbu   = JsonUtils.getString(detalles, "cbu");
+        String banco = JsonUtils.getString(detalles, "banco");
+        return new PagoTransferencia(cbu, banco);
       case "tarjeta":
       default:
-        return new TarjetaCredito("4532015112830366", "123");
+        String numero = JsonUtils.getString(detalles, "numero");
+        String cvv    = JsonUtils.getString(detalles, "cvv");
+        return new TarjetaCredito(numero, cvv);
     }
   }
 }

@@ -21,17 +21,6 @@ public class DBConnection {
         return createConnection();
     }
 
-    public static synchronized void resetDemoData() throws Exception {
-        try (Connection conn = createConnection(); Statement stmt = conn.createStatement()) {
-            stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 0");
-            stmt.executeUpdate("TRUNCATE TABLE pedido_items");
-            stmt.executeUpdate("TRUNCATE TABLE pedidos");
-            stmt.executeUpdate("TRUNCATE TABLE productos");
-            stmt.executeUpdate("TRUNCATE TABLE usuarios");
-            stmt.executeUpdate("SET FOREIGN_KEY_CHECKS = 1");
-        }
-    }
-
     private static Connection createConnection() throws Exception {
         Properties props = new Properties();
         try (InputStream in = new FileInputStream("database.properties")) {
@@ -71,10 +60,14 @@ public class DBConnection {
 
             stmt.executeUpdate("CREATE TABLE IF NOT EXISTS pedidos (" +
                     "id BIGINT PRIMARY KEY, " +
+                    "usuario_id BIGINT, " +
                     "fecha DATE, " +
                     "estado VARCHAR(50), " +
                     "metodo_pago VARCHAR(100), " +
                     "total DOUBLE) ");
+            try {
+                stmt.executeUpdate("ALTER TABLE pedidos ADD COLUMN usuario_id BIGINT NULL");
+            } catch (SQLException ignored) {}
 
             stmt.executeUpdate("CREATE TABLE IF NOT EXISTS pedido_items (" +
                     "pedido_id BIGINT, " +

@@ -10,4 +10,7 @@ public interface IPedidoRepository {
     void removeById(int id);
     Pedido findById(int id);
     List<Pedido> findAll();
+    List<Pedido> findByUsuarioId(long usuarioId);
+    void updateEstado(long pedidoId, String estado);
+    long getMaxId();
 }

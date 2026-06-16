@@ -29,16 +29,17 @@ public class PedidoRepository implements IPedidoRepository {
     @Override
     public void save(Pedido pedido) {
         if (pedido == null) throw new IllegalArgumentException("El pedido no puede ser nulo.");
-        String pedidoSql = "INSERT INTO pedidos (id, fecha, estado, metodo_pago, total) VALUES (?, ?, ?, ?, ?)";
+        String pedidoSql = "INSERT INTO pedidos (id, usuario_id, fecha, estado, metodo_pago, total) VALUES (?, ?, ?, ?, ?, ?)";
         String itemSql = "INSERT INTO pedido_items (pedido_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)";
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement pedidoPs = conn.prepareStatement(pedidoSql);
              PreparedStatement itemPs = conn.prepareStatement(itemSql)) {
             pedidoPs.setLong(1, pedido.getId());
-            pedidoPs.setString(2, pedido.getFecha().toString());
-            pedidoPs.setString(3, pedido.getEstadoNombre());
-            pedidoPs.setString(4, pedido.getMetodoPago().getNombre());
-            pedidoPs.setDouble(5, pedido.calcularTotal());
+            pedidoPs.setLong(2, pedido.getUsuarioId());
+            pedidoPs.setString(3, pedido.getFecha().toString());
+            pedidoPs.setString(4, pedido.getEstadoNombre());
+            pedidoPs.setString(5, pedido.getMetodoPago().getNombre());
+            pedidoPs.setDouble(6, pedido.calcularTotal());
             pedidoPs.executeUpdate();
 
             for (ItemCarrito item : pedido.getItems()) {
@@ -78,7 +79,7 @@ public class PedidoRepository implements IPedidoRepository {
 
     @Override
     public Pedido findById(int id) {
-        String sql = "SELECT id, fecha, estado, metodo_pago FROM pedidos WHERE id = ?";
+        String sql = "SELECT id, usuario_id, fecha, estado, metodo_pago FROM pedidos WHERE id = ?";
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, id);
@@ -95,7 +96,7 @@ public class PedidoRepository implements IPedidoRepository {
 
     @Override
     public List<Pedido> findAll() {
-        String sql = "SELECT id, fecha, estado, metodo_pago FROM pedidos";
+        String sql = "SELECT id, usuario_id, fecha, estado, metodo_pago FROM pedidos";
         List<Pedido> pedidos = new ArrayList<>();
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
@@ -109,14 +110,58 @@ public class PedidoRepository implements IPedidoRepository {
         return pedidos;
     }
 
+    @Override
+    public List<Pedido> findByUsuarioId(long usuarioId) {
+        String sql = "SELECT id, usuario_id, fecha, estado, metodo_pago FROM pedidos WHERE usuario_id = ?";
+        List<Pedido> pedidos = new ArrayList<>();
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, usuarioId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    pedidos.add(buildPedidoFromResultSet(rs));
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return pedidos;
+    }
+
+    @Override
+    public void updateEstado(long pedidoId, String estado) {
+        String sql = "UPDATE pedidos SET estado = ? WHERE id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, estado);
+            ps.setLong(2, pedidoId);
+            ps.executeUpdate();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public long getMaxId() {
+        String sql = "SELECT COALESCE(MAX(id), 0) FROM pedidos";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) return rs.getLong(1);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return 0;
+    }
+
     private Pedido buildPedidoFromResultSet(ResultSet rs) throws Exception {
         long pedidoId = rs.getLong("id");
-        String fecha = rs.getString("fecha");
+        long usuarioId = rs.getLong("usuario_id");
         String estado = rs.getString("estado");
         String metodoPago = rs.getString("metodo_pago");
 
         List<model.carrito.ItemCarrito> items = loadItems(pedidoId);
-        Pedido pedido = new Pedido(pedidoId, items, buildMetodoPago(metodoPago), new ArrayList<>());
+        Pedido pedido = new Pedido(pedidoId, usuarioId, items, buildMetodoPago(metodoPago), new ArrayList<>());
         pedido.cambiarEstado(buildEstado(estado));
         return pedido;
     }

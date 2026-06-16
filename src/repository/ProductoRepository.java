@@ -32,6 +32,19 @@ public class ProductoRepository implements IProductoRepository {
     }
 
     @Override
+    public void updateStock(long id, int nuevoStock) {
+        String sql = "UPDATE productos SET stock = ? WHERE id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, nuevoStock);
+            ps.setLong(2, id);
+            ps.executeUpdate();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public Producto findById(long id) {
         String sql = "SELECT id, nombre, precio, stock, categoria_nombre FROM productos WHERE id = ?";
         try (Connection conn = DBConnection.getConnection();

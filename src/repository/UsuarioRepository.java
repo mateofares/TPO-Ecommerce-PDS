@@ -5,7 +5,6 @@ import model.usuario.Cliente;
 import model.usuario.Usuario;
 
 import java.sql.Connection;
-import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 
@@ -30,6 +29,30 @@ public class UsuarioRepository implements IUsuarioRepository {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public Usuario findById(long id) {
+        String sql = "SELECT id, nombre, apellido, email, contrasenia, rol FROM usuarios WHERE id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String nombre     = rs.getString("nombre");
+                    String apellido   = rs.getString("apellido");
+                    String email      = rs.getString("email");
+                    String contrasenia = rs.getString("contrasenia");
+                    String rol        = rs.getString("rol");
+                    if ("ADMIN".equalsIgnoreCase(rol))
+                        return new Administrador(id, nombre, apellido, email, contrasenia, 0);
+                    return new Cliente(id, nombre, apellido, email, contrasenia);
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return null;
     }
 
     @Override
@@ -71,10 +94,4 @@ public class UsuarioRepository implements IUsuarioRepository {
         }
     }
 
-    private boolean hasColumn(Connection conn, String tableName, String columnName) throws Exception {
-        DatabaseMetaData meta = conn.getMetaData();
-        try (ResultSet rs = meta.getColumns(null, null, tableName, columnName)) {
-            return rs.next();
-        }
-    }
 }

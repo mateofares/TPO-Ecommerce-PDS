@@ -21,7 +21,7 @@ const store = {
   metodoSeleccionado: null,
 };
 
-const ESTADOS = ['Pendiente', 'Pagado', 'Enviado', 'Entregado'];
+const ESTADOS_CSS = ['Pendiente', 'Pagado', 'Enviado', 'Entregado']; // solo para clases CSS
 
 const EMOJIS_CAT = {
   'Electrónica': '💻', 'Celulares': '📱', 'Laptops': '💻',
@@ -237,7 +237,7 @@ function renderCarrito() {
 
   container.innerHTML = store.carrito.map(i => `
     <div class="cart-item">
-      <div class="cart-item-icon">${i.producto.emoji}</div>
+      <div class="cart-item-icon">${getEmojiProducto(i.producto.nombre)}</div>
       <div class="cart-item-info">
         <div class="cart-item-name">${i.producto.nombre}</div>
         <div class="cart-item-price">$${(i.producto.precio * i.cantidad).toFixed(2)}</div>
@@ -259,16 +259,20 @@ function toggleCarrito() {
   const isOpen  = panel.classList.contains('open');
   if (isOpen) {
     panel.classList.remove('open');
+    panel.classList.add('hidden');
     overlay.classList.add('hidden');
   } else {
     renderCarrito();
+    panel.classList.remove('hidden');
     panel.classList.add('open');
     overlay.classList.remove('hidden');
   }
 }
 
 function cerrarTodo() {
-  document.getElementById('carritoPanel').classList.remove('open');
+  const panel = document.getElementById('carritoPanel');
+  panel.classList.remove('open');
+  panel.classList.add('hidden');
   document.getElementById('overlay').classList.add('hidden');
 }
 
@@ -312,8 +316,7 @@ function confirmarCompra() {
     return;
   }
 
-  // Validaciones Strategy
-  let nombreMetodo = '';
+  let detallesPago = {};
   if (store.metodoSeleccionado === 'tarjeta') {
     const num = document.getElementById('cardNumero').value.trim();
     const cvv = document.getElementById('cardCVV').value.trim();
@@ -323,13 +326,13 @@ function confirmarCompra() {
     if (cvv.length < 3 || !/^\d+$/.test(cvv)) {
       mostrarError('checkoutError', 'CVV inválido.'); return;
     }
-    nombreMetodo = 'tarjeta';
+    detallesPago = { numero: num, cvv };
   } else if (store.metodoSeleccionado === 'paypal') {
     const cuenta = document.getElementById('ppCuenta').value.trim();
     if (!cuenta.includes('@')) {
       mostrarError('checkoutError', 'Email de PayPal inválido.'); return;
     }
-    nombreMetodo = 'paypal';
+    detallesPago = { cuenta };
   } else if (store.metodoSeleccionado === 'transferencia') {
     const cbu   = document.getElementById('transCBU').value.trim();
     const banco = document.getElementById('transBanco').value.trim();
@@ -339,10 +342,9 @@ function confirmarCompra() {
     if (!banco) {
       mostrarError('checkoutError', 'Ingresá el nombre del banco.'); return;
     }
-    nombreMetodo = 'transferencia';
+    detallesPago = { cbu, banco };
   }
 
-  // Verificar stock antes de confirmar
   for (const item of store.carrito) {
     if (item.producto.stock < item.cantidad) {
       mostrarError('checkoutError', `Stock insuficiente para ${item.producto.nombre}.`);
@@ -350,11 +352,10 @@ function confirmarCompra() {
     }
   }
 
-  // Enviar pedido al API
-  crearPedidoEnAPI(nombreMetodo);
+  crearPedidoEnAPI(store.metodoSeleccionado, detallesPago);
 }
 
-async function crearPedidoEnAPI(metodoPago) {
+async function crearPedidoEnAPI(metodoPago, detallesPago) {
   try {
     const items = store.carrito.map(i => ({
       productoId: i.producto.id,
@@ -367,6 +368,7 @@ async function crearPedidoEnAPI(metodoPago) {
       body: JSON.stringify({
         usuarioId: store.usuarioActual.id,
         metodoPago: metodoPago,
+        detallesPago: detallesPago,
         items: items
       })
     });
@@ -384,6 +386,10 @@ async function crearPedidoEnAPI(metodoPago) {
     cerrarModal('modalCheckout');
 
     toast(`¡Pedido confirmado! Pago procesado. ✓`, 'success');
+
+    // Recargar productos desde la API para reflejar el stock actualizado
+    const respProductos = await fetch(`${API_BASE_URL}/productos`);
+    store.productos = await respProductos.json();
     renderCatalogo(store.productos);
 
   } catch (error) {
@@ -427,11 +433,10 @@ async function renderAdminPedidos() {
 }
 
 function renderPedidoCard(pedido, esAdmin) {
-  const sigEstado = siguienteEstado(pedido.estado);
   const itemsTexto = pedido.items.map(i => `${i.producto.nombre} x${i.cantidad}`).join(', ');
 
-  const btnAvanzar = esAdmin && sigEstado
-    ? `<button onclick="avanzarEstadoPedido(${pedido.id})">→ ${sigEstado}</button>`
+  const btnAvanzar = esAdmin && pedido.puedeAvanzar
+    ? `<button onclick="avanzarEstadoPedido(${pedido.id})">Avanzar estado</button>`
     : '';
 
   return `
@@ -451,29 +456,19 @@ function renderPedidoCard(pedido, esAdmin) {
     </div>`;
 }
 
-function siguienteEstado(estadoActual) {
-  const idx = ESTADOS.indexOf(estadoActual);
-  return idx >= 0 && idx < ESTADOS.length - 1 ? ESTADOS[idx + 1] : null;
-}
 
-function avanzarEstadoPedido(pedidoId) {
-  const pedido = store.pedidos.find(p => p.id === pedidoId);
-  if (!pedido) return;
-  const sig = siguienteEstado(pedido.estado);
-  if (!sig) return;
-  pedido.estado = sig;
-
-  // Observer: notificar al cliente
-  notificarCambioEstado(pedido);
-
-  renderAdminPedidos();
-  toast(`Pedido #${pedido.id} actualizado a "${sig}"`, 'success');
-}
-
-function notificarCambioEstado(pedido) {
-  const cliente = store.usuarios.find(u => u.id === pedido.clienteId);
-  if (cliente) {
-    console.log(`[EMAIL -> ${cliente.email}] Pedido #${pedido.id} cambió a: ${pedido.estado}`);
+async function avanzarEstadoPedido(pedidoId) {
+  try {
+    const resp = await fetch(`${API_BASE_URL}/pedidos/${pedidoId}/avanzar`, { method: 'PUT' });
+    const data = await resp.json();
+    if (!resp.ok) {
+      toast(data.error || 'Error al avanzar estado', 'error');
+      return;
+    }
+    renderAdminPedidos();
+    toast(`Pedido #${pedidoId} → ${data.pedido.estado}`, 'success');
+  } catch (error) {
+    toast('Error: ' + error.message, 'error');
   }
 }
 
