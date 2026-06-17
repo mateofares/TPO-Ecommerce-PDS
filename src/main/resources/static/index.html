@@ -152,6 +152,10 @@
           <input type="radio" name="pago" value="tarjeta" />
           <div>💳 <strong>Tarjeta de Crédito</strong></div>
         </label>
+        <label class="payment-card" onclick="seleccionarPago('debito')">
+          <input type="radio" name="pago" value="debito" />
+          <div>💳 <strong>Tarjeta de Débito</strong></div>
+        </label>
         <label class="payment-card" onclick="seleccionarPago('paypal')">
           <input type="radio" name="pago" value="paypal" />
           <div>🅿 <strong>PayPal</strong></div>
@@ -164,6 +168,10 @@
       <div id="pagoFormTarjeta" class="pago-form hidden">
         <input type="text" id="cardNumero" placeholder="Número de tarjeta (16 dígitos)" maxlength="16" />
         <input type="text" id="cardCVV" placeholder="CVV" maxlength="4" />
+      </div>
+      <div id="pagoFormDebito" class="pago-form hidden">
+        <input type="text" id="debitNumero" placeholder="Número de tarjeta (16 dígitos)" maxlength="16" />
+        <input type="text" id="debitCVV" placeholder="CVV" maxlength="4" />
       </div>
       <div id="pagoFormPaypal" class="pago-form hidden">
         <input type="email" id="ppCuenta" placeholder="Cuenta PayPal" />

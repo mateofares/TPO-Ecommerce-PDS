@@ -74,6 +74,9 @@ public class PedidoService {
         cliente.agregarPedido(pedido);
         Pedido pedidoGuardado = pedidoRepository.save(pedido);
 
+        // vaciamos el carrito del cliente tras confirmar la compra
+        cliente.getCarrito().vaciar();
+
         // mandamos email de confirmación automáticamente
         notificacionService.suscribir(pedidoGuardado.getId(), "EMAIL", cliente.getEmail());
         notificacionService.notificar(pedidoGuardado.getId(),

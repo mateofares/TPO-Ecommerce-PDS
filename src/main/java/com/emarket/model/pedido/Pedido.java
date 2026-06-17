@@ -48,6 +48,7 @@ public class Pedido {
     private Cliente cliente;
 
     // no se guardan en BD, se cargan en cada request
+    @JsonIgnore
     @Transient
     private List<ObservadorPedido> observadores = new ArrayList<>();
 

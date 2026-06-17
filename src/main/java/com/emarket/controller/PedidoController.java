@@ -77,10 +77,11 @@ public class PedidoController {
     @PutMapping("/{id}/avanzar")
     public ResponseEntity<?> avanzar(@PathVariable Long id) {
         try {
+            String estadoAnterior = pedidoService.buscarPorId(id).getEstadoNombreStr();
             Pedido p = pedidoService.avanzarEstado(id);
             return ResponseEntity.ok(Map.of(
                     "id", p.getId(),
-                    "estadoAnterior", p.getEstadoNombre(),
+                    "estadoAnterior", estadoAnterior,
                     "estadoActual", p.getEstadoNombreStr()
             ));
         } catch (IllegalArgumentException | IllegalStateException e) {

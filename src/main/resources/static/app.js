@@ -174,8 +174,16 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') buscarProductos();
 });
 
-// ── Carrito (local, se envía al confirmar) ────────────────────────────────────
-function agregarAlCarrito(productoId) {
+// ── Carrito (persistido en backend via CarritoController) ────────────────────
+async function cargarCarritoBackend() {
+  if (!store.usuarioActual || store.usuarioActual.rol === 'ADMINISTRADOR') return;
+  const data = await apiGet(`/carrito/${store.usuarioActual.id}`);
+  store.carrito = data.items.map(i => ({ producto: i.producto, cantidad: i.cantidad }));
+  actualizarBadgeCarrito();
+  renderCarrito();
+}
+
+async function agregarAlCarrito(productoId) {
   if (!store.usuarioActual) {
     toast('Iniciá sesión para agregar productos', 'error');
     abrirModal('modalLogin');
@@ -195,33 +203,41 @@ function agregarAlCarrito(productoId) {
     return;
   }
 
-  if (item) { item.cantidad++; }
-  else { store.carrito.push({ producto: prod, cantidad: 1 }); }
-
-  actualizarBadgeCarrito();
-  renderCarrito();
-  toast(`${prod.nombre} agregado al carrito ✓`, 'success');
+  try {
+    await apiPost(`/carrito/${store.usuarioActual.id}/agregar`, { productoId, cantidad: 1 });
+    await cargarCarritoBackend();
+    toast(`${prod.nombre} agregado al carrito ✓`, 'success');
+  } catch (e) {
+    toast(e.message || 'Error al agregar al carrito', 'error');
+  }
 }
 
-function cambiarCantidad(productoId, delta) {
+async function cambiarCantidad(productoId, delta) {
   const item = store.carrito.find(i => i.producto.id === productoId);
   if (!item) return;
   const nueva = item.cantidad + delta;
-  if (nueva <= 0) {
-    store.carrito = store.carrito.filter(i => i.producto.id !== productoId);
-  } else if (nueva > item.producto.stock) {
-    toast('Cantidad máxima alcanzada', 'error');
-  } else {
-    item.cantidad = nueva;
+  try {
+    if (nueva <= 0) {
+      await apiDelete(`/carrito/${store.usuarioActual.id}/items/${productoId}`);
+    } else if (nueva > item.producto.stock) {
+      toast('Cantidad máxima alcanzada', 'error');
+      return;
+    } else {
+      await apiPut(`/carrito/${store.usuarioActual.id}/items/${productoId}`, { cantidad: nueva });
+    }
+    await cargarCarritoBackend();
+  } catch (e) {
+    toast(e.message || 'Error al actualizar carrito', 'error');
   }
-  actualizarBadgeCarrito();
-  renderCarrito();
 }
 
-function eliminarDelCarrito(productoId) {
-  store.carrito = store.carrito.filter(i => i.producto.id !== productoId);
-  actualizarBadgeCarrito();
-  renderCarrito();
+async function eliminarDelCarrito(productoId) {
+  try {
+    await apiDelete(`/carrito/${store.usuarioActual.id}/items/${productoId}`);
+    await cargarCarritoBackend();
+  } catch (e) {
+    toast(e.message || 'Error al eliminar del carrito', 'error');
+  }
 }
 
 function calcularTotalCarrito() {
@@ -312,6 +328,7 @@ function seleccionarPago(metodo) {
   document.querySelector(`input[value="${metodo}"]`)?.closest('.payment-card')?.classList.add('selected');
 
   document.getElementById('pagoFormTarjeta').classList.toggle('hidden', metodo !== 'tarjeta');
+  document.getElementById('pagoFormDebito').classList.toggle('hidden', metodo !== 'debito');
   document.getElementById('pagoFormPaypal').classList.toggle('hidden', metodo !== 'paypal');
   document.getElementById('pagoFormTransferencia').classList.toggle('hidden', metodo !== 'transferencia');
 }
@@ -336,6 +353,14 @@ async function confirmarCompra() {
     if (num.length < 16 || !/^\d+$/.test(num)) { mostrarError('checkoutError', 'Número de tarjeta inválido.'); return; }
     if (cvv.length < 3)  { mostrarError('checkoutError', 'CVV inválido.'); return; }
     body.tipoPago = 'TARJETA_CREDITO';
+    body.numero = num;
+    body.cvv = cvv;
+  } else if (store.metodoSeleccionado === 'debito') {
+    const num = document.getElementById('debitNumero').value.trim();
+    const cvv = document.getElementById('debitCVV').value.trim();
+    if (num.length < 16 || !/^\d+$/.test(num)) { mostrarError('checkoutError', 'Número de tarjeta inválido.'); return; }
+    if (cvv.length < 3)  { mostrarError('checkoutError', 'CVV inválido.'); return; }
+    body.tipoPago = 'TARJETA_DEBITO';
     body.numero = num;
     body.cvv = cvv;
   } else if (store.metodoSeleccionado === 'paypal') {
@@ -438,9 +463,9 @@ function siguienteEstado(estadoActual) {
 
 async function avanzarEstadoPedido(pedidoId) {
   try {
-    // State pattern: el backend aplica avanzarEstado() → notifica observadores (Observer)
-    await apiPut(`/pedidos/${pedidoId}/avanzar`, {});
-    toast(`Pedido #${pedidoId} avanzó de estado`, 'success');
+    const res = await apiPut(`/pedidos/${pedidoId}/avanzar`, {});
+    const nuevoEstado = res.estadoActual || '';
+    toast(`📧 Notificación enviada: Pedido #${pedidoId} cambió a "${nuevoEstado}"`, 'success');
     renderAdminPedidos();
   } catch (e) {
     toast(e.message, 'error');
@@ -498,6 +523,9 @@ function iniciarSesion(usuario) {
   document.getElementById('userNameDisplay').textContent =
     `${usuario.nombre} (${usuario.rol === 'ADMINISTRADOR' ? 'Admin' : 'Cliente'})`;
   document.getElementById('btnAdmin').classList.toggle('hidden', usuario.rol !== 'ADMINISTRADOR');
+  if (usuario.rol !== 'ADMINISTRADOR') {
+    cargarCarritoBackend().catch(() => {});
+  }
 }
 
 function cerrarSesion() {
